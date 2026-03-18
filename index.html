@@ -350,9 +350,10 @@
   <div class="view" id="view-backup">
     <div class="dp">
       <div class="dp-title">☁️ Google Drive Backup</div>
-      <div class="dp-sub">Receipts auto-sync to <strong>receipt-vault-backup.json</strong> in your Drive every time you save. Restore any time — even after clearing your browser.</div>
-      <div class="dp-acts">
-        <button class="btn btn-primary" id="btn-backup-now" style="flex:1">☁️ Backup Now</button>
+      <div class="dp-sub">Receipts auto-sync to <strong>receipt-vault-backup.json</strong> in your Drive every time you save. Tap <strong>Connect Drive</strong> first to authorise access.</div>
+      <div class="dp-acts" style="flex-wrap:wrap;gap:8px">
+        <button class="btn btn-primary" id="btn-connect-drive" style="flex:1">🔑 Connect Drive</button>
+        <button class="btn" id="btn-backup-now" style="flex:1">☁️ Backup Now</button>
         <button class="btn" id="btn-restore" style="flex:1">⬇️ Restore</button>
       </div>
     </div>
@@ -423,7 +424,7 @@
 // ═══════════════════════════════════════════
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw2.js').then(reg => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
       console.log('SW registered:', reg.scope);
     }).catch(err => console.warn('SW registration failed:', err));
   });
@@ -495,9 +496,12 @@ const delR   = id => new Promise((res,rej) => { const q=tx('readwrite').delete(i
 const clearR = () => new Promise((res,rej) => { const q=tx('readwrite').clear(); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
 
 // ═══════════════════════════════════════════
-//  GOOGLE DRIVE BACKUP (via Claude MCP)
+//  GOOGLE DRIVE BACKUP (OAuth 2.0 implicit flow)
 // ═══════════════════════════════════════════
 const BACKUP_FILE = 'receipt-vault-backup.json';
+const GOOGLE_CLIENT_ID = '552634016863-t4gilrro4jgh92d3122317rok33kkchk.apps.googleusercontent.com';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+let driveToken = null;
 let backupLog = [];
 
 function logB(msg, ok=true) {
@@ -513,90 +517,152 @@ function renderLog() {
     : '<div style="color:var(--text-faint)">No backup activity yet</div>';
 }
 
+// Load saved token from localStorage
+function loadToken() {
+  try {
+    const t = JSON.parse(localStorage.getItem('rv_drive_token')||'null');
+    if (t && t.expires > Date.now()) { driveToken = t.access_token; return true; }
+  } catch(e) {}
+  driveToken = null; return false;
+}
+
+function saveToken(token, expiresIn) {
+  try {
+    localStorage.setItem('rv_drive_token', JSON.stringify({
+      access_token: token, expires: Date.now() + (expiresIn - 60) * 1000
+    }));
+  } catch(e) {}
+  driveToken = token;
+}
+
+// OAuth popup
+function authoriseDrive() {
+  return new Promise((res, rej) => {
+    const state = Math.random().toString(36).slice(2);
+    const redirect = encodeURIComponent(window.location.origin + window.location.pathname);
+    const url = `https://accounts.google.com/o/oauth2/v2/auth`
+      + `?client_id=${GOOGLE_CLIENT_ID}`
+      + `&redirect_uri=${redirect}`
+      + `&response_type=token`
+      + `&scope=${encodeURIComponent(DRIVE_SCOPE)}`
+      + `&state=${state}`
+      + `&prompt=consent`;
+
+    const popup = window.open(url, 'google-auth', 'width=500,height=600');
+    if (!popup) { rej(new Error('Popup blocked — please allow popups for this site')); return; }
+
+    const timer = setInterval(() => {
+      try {
+        if (popup.closed) { clearInterval(timer); rej(new Error('Auth window closed')); return; }
+        const href = popup.location.href;
+        if (href.includes('access_token')) {
+          popup.close(); clearInterval(timer);
+          const params = new URLSearchParams(href.split('#')[1]);
+          const token = params.get('access_token');
+          const expiresIn = parseInt(params.get('expires_in')||'3600');
+          saveToken(token, expiresIn);
+          setSyncState('synced','Drive connected');
+          logB('Google Drive authorised ✓');
+          res(token);
+        }
+      } catch(e) { /* cross-origin, keep waiting */ }
+    }, 300);
+  });
+}
+
+async function getToken() {
+  if (loadToken()) return driveToken;
+  return await authoriseDrive();
+}
+
+// Find existing backup file ID
+async function findBackupFile(token) {
+  const q = encodeURIComponent(`name='${BACKUP_FILE}' and trashed=false`);
+  const res = await fetch(`https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  const data = await res.json();
+  return data.files?.[0]?.id || null;
+}
+
 async function backupToDrive(receipts) {
   setSyncState('syncing','Syncing…');
   try {
+    const token = await getToken();
     const payload = {
       receipts: receipts.map(r => ({...r, image: r.image ? '[image]' : null})),
       imageStore: receipts.filter(r=>r.image).reduce((a,r)=>{a[r.id]=r.image;return a;},{}),
       exportedAt: new Date().toISOString(), version: 2
     };
     const content = JSON.stringify(payload, null, 2);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 1000,
-        mcp_servers: [{type:'url', url:'https://gdrive.mcp.claude.com/mcp', name:'gdrive'}],
-        system: `You are a file manager. Use Google Drive MCP tools to save a JSON file.
-1. Search for "${BACKUP_FILE}" in Drive
-2. Update it if found, create it if not
-Respond ONLY with JSON: {"success":true,"action":"created|updated"} or {"success":false,"error":"..."}`,
-        messages: [{role:'user', content:`Save this JSON as "${BACKUP_FILE}" in Google Drive root, overwriting if it exists:\n\n${content}`}]
-      })
-    });
-    const data = await res.json();
-    const toolResults = data.content?.filter(b=>b.type==='mcp_tool_result')||[];
-    const textBlock = data.content?.find(b=>b.type==='text');
-    if (toolResults.length > 0 || (textBlock && textBlock.text.includes('success'))) {
-      setSyncState('synced','Synced');
-      logB(`Backed up ${receipts.length} receipts to Drive`);
-      try { localStorage.setItem('rv_lastSync', new Date().toISOString()); } catch(e){}
-      return true;
+    const blob = new Blob([content], {type:'application/json'});
+    const fileId = await findBackupFile(token);
+
+    if (fileId) {
+      // Update existing file
+      await fetch(`https://www.googleapis.com/upload/drive/v3/files/${fileId}?uploadType=media`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: blob
+      });
+    } else {
+      // Create new file
+      const meta = new Blob([JSON.stringify({name: BACKUP_FILE, mimeType:'application/json'})], {type:'application/json'});
+      const form = new FormData();
+      form.append('metadata', meta);
+      form.append('file', blob);
+      await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: form
+      });
     }
-    throw new Error('Unexpected response from Drive MCP');
+
+    setSyncState('synced', 'Synced ' + new Date().toLocaleTimeString());
+    logB(`Backed up ${receipts.length} receipts to Drive`);
+    try { localStorage.setItem('rv_lastSync', new Date().toISOString()); } catch(e){}
+    return true;
   } catch(e) {
     setSyncState('error','Sync failed');
     logB('Backup failed: ' + e.message, false);
+    // Clear token if expired
+    if (e.message.includes('401') || e.message.includes('auth')) {
+      localStorage.removeItem('rv_drive_token'); driveToken = null;
+    }
     return false;
   }
 }
 
 async function restoreFromDrive() {
   setSyncState('syncing','Restoring…');
-  showToast('Searching Drive for backup…','warn');
+  showToast('Connecting to Drive…','warn');
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514', max_tokens: 8000,
-        mcp_servers: [{type:'url', url:'https://gdrive.mcp.claude.com/mcp', name:'gdrive'}],
-        system: `You are a file retrieval assistant.
-Find "${BACKUP_FILE}" in Google Drive and return its content.
-Respond ONLY with JSON: {"success":true,"content":<parsed file JSON>} or {"success":false,"error":"..."}`,
-        messages: [{role:'user', content:`Find and return the full content of "${BACKUP_FILE}" from Google Drive.`}]
-      })
+    const token = await getToken();
+    const fileId = await findBackupFile(token);
+    if (!fileId) throw new Error('No backup file found in Drive');
+
+    const res = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: { Authorization: `Bearer ${token}` }
     });
-    const data = await res.json();
-    const textBlock = data.content?.find(b=>b.type==='text');
-    if (textBlock) {
-      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const result = JSON.parse(jsonMatch[0]);
-        if (result.success && result.content) {
-          const bk = result.content;
-          const receipts = bk.receipts || [];
-          if (bk.imageStore) receipts.forEach(r => { if (bk.imageStore[r.id]) r.image = bk.imageStore[r.id]; });
-          const existing = await allR();
-          const existIds = new Set(existing.map(r=>r.id));
-          const toAdd = receipts.filter(r=>!existIds.has(r.id));
-          for (const r of toAdd) await saveR(r);
-          allReceipts = await allR();
-          updateHeader();
-          setSyncState('synced','Synced');
-          logB(`Restored ${toAdd.length} receipts (${receipts.length-toAdd.length} already present)`);
-          showToast(`Restored ${toAdd.length} receipts ✓`);
-          renderVault();
-          return;
-        }
-      }
-    }
-    throw new Error('Could not parse backup');
+    const bk = await res.json();
+    const receipts = bk.receipts || [];
+    if (bk.imageStore) receipts.forEach(r => { if (bk.imageStore[r.id]) r.image = bk.imageStore[r.id]; });
+
+    const existing = await allR();
+    const existIds = new Set(existing.map(r=>r.id));
+    const toAdd = receipts.filter(r=>!existIds.has(r.id));
+    for (const r of toAdd) await saveR(r);
+    allReceipts = await allR();
+    updateHeader();
+    setSyncState('synced','Synced');
+    logB(`Restored ${toAdd.length} receipts (${receipts.length-toAdd.length} already present)`);
+    showToast(`Restored ${toAdd.length} receipts ✓`);
+    renderVault();
   } catch(e) {
     setSyncState('error','Restore failed');
-    logB('Restore failed: '+e.message, false);
-    showToast('Restore failed','error');
+    logB('Restore failed: ' + e.message, false);
+    showToast('Restore failed: ' + e.message, 'error');
+    if (e.message.includes('401')) { localStorage.removeItem('rv_drive_token'); driveToken = null; }
   }
 }
 
@@ -807,6 +873,16 @@ document.getElementById('m-del').addEventListener('click',async()=>{
 // ═══════════════════════════════════════════
 //  BACKUP ACTIONS
 // ═══════════════════════════════════════════
+document.getElementById('btn-connect-drive').addEventListener('click', async () => {
+  try {
+    await authoriseDrive();
+    showToast('Google Drive connected ✓');
+    document.getElementById('btn-connect-drive').textContent = '✓ Drive Connected';
+    document.getElementById('btn-connect-drive').disabled = true;
+  } catch(e) {
+    showToast(e.message, 'error');
+  }
+});
 document.getElementById('btn-backup-now').addEventListener('click',async()=>{
   const ok=await backupToDrive(allReceipts);
   showToast(ok?'Backed up to Drive ✓':'Backup failed','error');
@@ -871,6 +947,12 @@ function fmtDate(d) {
   } else if(lastSync){
     setSyncState('synced','Synced '+new Date(lastSync).toLocaleDateString());
     logB('Last sync: '+new Date(lastSync).toLocaleString());
+  }
+  // Show drive connected state
+  if (loadToken()) {
+    setSyncState('synced', 'Drive connected');
+    const btn = document.getElementById('btn-connect-drive');
+    if (btn) { btn.textContent = '✓ Drive Connected'; btn.disabled = true; }
   }
 })();
 </script>
