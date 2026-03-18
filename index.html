@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#0a0a0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Receipt Vault">
+<meta name="description" content="Scan, store and organise receipts with AI-powered OCR">
+
+<!-- PWA Manifest -->
+<link rel="manifest" href="manifest.json">
+
+<!-- iOS icons (Kiwi / Safari fallback) -->
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" sizes="152x152" href="icons/icon-152.png">
+<link rel="apple-touch-icon" sizes="144x144" href="icons/icon-144.png">
+
+<title>Receipt Vault</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+
+<style>
+  :root {
+    --bg: #0a0a0a;
+    --surface: #111111;
+    --surface2: #1a1a1a;
+    --border: #2a2a2a;
+    --accent: #c8f564;
+    --text: #f0f0f0;
+    --text-dim: #888;
+    --text-faint: #444;
+    --danger: #f56464;
+    --warn: #f5c864;
+    --radius: 16px;
+    --radius-sm: 8px;
+    --font-head: 'Syne', sans-serif;
+    --font-mono: 'DM Mono', monospace;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--font-mono);
+    height: 100dvh; overflow: hidden;
+  }
+  #app { display: flex; flex-direction: column; height: 100dvh; padding-top: var(--safe-top); }
+
+  /* ── Header ── */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 20px 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    flex-shrink: 0;
+  }
+  .header-logo { font-family: var(--font-head); font-weight: 800; font-size: 21px; letter-spacing: -0.5px; }
+  .header-logo span { color: var(--accent); }
+  .sync-badge {
+    font-size: 10px; padding: 4px 10px; border-radius: 20px;
+    border: 1px solid var(--border); color: var(--text-dim);
+    display: flex; align-items: center; gap: 5px; cursor: pointer; transition: all 0.2s;
+  }
+  .sync-badge.synced  { border-color: var(--accent); color: var(--accent); }
+  .sync-badge.syncing { border-color: var(--warn); color: var(--warn); }
+  .sync-badge.error   { border-color: var(--danger); color: var(--danger); }
+  .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .sync-dot.pulse { animation: pulse 1.2s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.3} }
+
+  /* ── Nav ── */
+  .nav-tabs {
+    display: flex; gap: 4px; padding: 8px 14px;
+    border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0;
+    padding-bottom: calc(8px + var(--safe-bottom) * 0.3);
+  }
+  .tab-btn {
+    flex: 1; padding: 8px 4px; border: none; border-radius: var(--radius-sm);
+    background: transparent; color: var(--text-dim);
+    font-family: var(--font-mono); font-size: 10px;
+    cursor: pointer; transition: all 0.2s;
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+  }
+  .tab-btn .ti { font-size: 17px; }
+  .tab-btn.active { background: var(--surface2); color: var(--accent); }
+
+  /* ── Views ── */
+  .view { flex: 1; overflow-y: auto; padding: 14px; display: none; -webkit-overflow-scrolling: touch; }
+  .view.active { display: block; }
+
+  /* ── Scanner ── */
+  .scanner-hero {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius); overflow: hidden; position: relative;
+    aspect-ratio: 3/4; max-height: 48dvh;
+    display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
+  }
+  #camera-preview { width: 100%; height: 100%; object-fit: cover; display: none; }
+  .scanner-ph { display: flex; flex-direction: column; align-items: center; gap: 10px; color: var(--text-faint); }
+  .scanner-ph .bi { font-size: 48px; }
+  .scanner-ph p { font-size: 11px; text-align: center; max-width: 190px; line-height: 1.6; }
+  .scan-corners { position: absolute; inset: 12px; pointer-events: none; }
+  .scan-corners::before,.scan-corners::after,.scan-corners span::before,.scan-corners span::after
+    { content:''; position:absolute; width:20px; height:20px; border-color:var(--accent); border-style:solid; }
+  .scan-corners::before { top:0;left:0;border-width:2px 0 0 2px; }
+  .scan-corners::after  { top:0;right:0;border-width:2px 2px 0 0; }
+  .scan-corners span::before { bottom:0;left:0;border-width:0 0 2px 2px; }
+  .scan-corners span::after  { bottom:0;right:0;border-width:0 2px 2px 0; }
+  .scan-line {
+    position: absolute; left:12px; right:12px; height:2px;
+    background: linear-gradient(90deg,transparent,var(--accent),transparent);
+    animation: scanA 2s ease-in-out infinite; display: none;
+  }
+  @keyframes scanA { 0%{top:12px;opacity:0}10%{opacity:1}90%{opacity:1}100%{top:calc(100% - 14px);opacity:0} }
+  .proc-ov {
+    position:absolute; inset:0; background:rgba(10,10,10,.85);
+    display:none; align-items:center; justify-content:center;
+    flex-direction:column; gap:14px; border-radius:var(--radius);
+  }
+  .proc-ov.active { display:flex; }
+  .spinner { width:38px;height:38px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite; }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .proc-lbl { font-size:10px;color:var(--accent);letter-spacing:2px;text-transform:uppercase; }
+
+  /* ── Buttons ── */
+  .action-row { display:flex;gap:10px;margin-bottom:12px; }
+  .btn {
+    flex:1; padding:13px 10px; border:1px solid var(--border); border-radius:var(--radius);
+    background:var(--surface); color:var(--text);
+    font-family:var(--font-mono); font-size:12px;
+    cursor:pointer; transition:all .2s;
+    display:flex;align-items:center;justify-content:center;gap:7px;
+  }
+  .btn:active { transform:scale(.97); }
+  .btn-primary { background:var(--accent);color:#0a0a0a;border-color:var(--accent);font-weight:500; }
+  .btn-danger  { border-color:var(--danger);color:var(--danger); }
+
+  /* ── Form ── */
+  .fg { margin-bottom:11px; }
+  .fl { font-size:10px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:5px;display:block; }
+  .fi {
+    width:100%;padding:10px 13px;
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);
+    color:var(--text);font-family:var(--font-mono);font-size:13px;outline:none;transition:border-color .2s;
+  }
+  .fi:focus { border-color:var(--accent); }
+  select.fi { appearance:none; }
+  .row2 { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
+
+  /* ── Receipt cards ── */
+  .rc {
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:13px 15px;margin-bottom:9px;cursor:pointer;
+    transition:border-color .2s,transform .15s;display:flex;gap:13px;align-items:flex-start;
+  }
+  .rc:active { transform:scale(.99);border-color:var(--accent); }
+  .rthumb {
+    width:46px;height:58px;border-radius:6px;background:var(--surface2);
+    flex-shrink:0;display:flex;align-items:center;justify-content:center;
+    font-size:20px;border:1px solid var(--border);overflow:hidden;
+  }
+  .rthumb img { width:100%;height:100%;object-fit:cover; }
+  .rinfo { flex:1;min-width:0; }
+  .rmerch { font-family:var(--font-head);font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-bottom:3px; }
+  .rmeta  { font-size:11px;color:var(--text-dim);margin-bottom:5px; }
+  .rtags  { display:flex;flex-wrap:wrap;gap:4px; }
+  .tag { font-size:9px;padding:2px 7px;border-radius:20px;text-transform:uppercase;letter-spacing:1px;background:var(--surface2);border:1px solid var(--border);color:var(--text-dim); }
+  .tag.cat-food          { border-color:#f5a864;color:#f5a864; }
+  .tag.cat-transport     { border-color:#64b4f5;color:#64b4f5; }
+  .tag.cat-shopping      { border-color:#c864f5;color:#c864f5; }
+  .tag.cat-health        { border-color:#64f5c8;color:#64f5c8; }
+  .tag.cat-utilities     { border-color:#f56464;color:#f56464; }
+  .tag.cat-entertainment { border-color:#f5f564;color:#f5f564; }
+  .tag.cat-other         { border-color:#888;color:#888; }
+  .ramt { font-family:var(--font-head);font-weight:700;font-size:17px;color:var(--accent);flex-shrink:0; }
+
+  /* ── Modal ── */
+  .modal-ov { position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;display:none;align-items:flex-end; }
+  .modal-ov.open { display:flex; }
+  .modal {
+    background:var(--surface);border-radius:var(--radius) var(--radius) 0 0;
+    border:1px solid var(--border);border-bottom:none;
+    padding:18px;width:100%;max-height:85dvh;overflow-y:auto;
+    animation:slideUp .25s ease;
+    padding-bottom:calc(18px + var(--safe-bottom));
+  }
+  @keyframes slideUp{from{transform:translateY(40px);opacity:0}to{transform:translateY(0);opacity:1}}
+  .mhandle { width:36px;height:4px;background:var(--border);border-radius:2px;margin:0 auto 18px; }
+  .mtitle  { font-family:var(--font-head);font-weight:800;font-size:21px;margin-bottom:4px; }
+  .msub    { font-size:11px;color:var(--text-dim);margin-bottom:18px; }
+  .msec    { margin-bottom:16px; }
+  .mslbl   { font-size:9px;text-transform:uppercase;letter-spacing:2px;color:var(--text-faint);margin-bottom:7px; }
+  .mimg    { width:100%;border-radius:var(--radius-sm);border:1px solid var(--border); }
+  .ocr-text { background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);padding:11px;font-size:11px;line-height:1.7;color:var(--text-dim);white-space:pre-wrap;word-break:break-word;max-height:160px;overflow-y:auto; }
+  .mactions { display:flex;gap:10px;margin-top:14px; }
+
+  /* ── Stats ── */
+  .stat-grid { display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px; }
+  .stat-card { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:15px; }
+  .sval  { font-family:var(--font-head);font-weight:800;font-size:24px;color:var(--accent); }
+  .slbl  { font-size:10px;color:var(--text-dim);margin-top:3px;text-transform:uppercase;letter-spacing:1px; }
+  .bar-row { margin-bottom:9px; }
+  .bar-info { display:flex;justify-content:space-between;font-size:11px;margin-bottom:4px; }
+  .bar-track { background:var(--surface2);border-radius:3px;height:6px; }
+  .bar-fill { height:100%;border-radius:3px;background:var(--accent);transition:width .6s ease; }
+
+  /* ── Backup panel ── */
+  .dp { background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:15px;margin-bottom:12px; }
+  .dp-title { font-family:var(--font-head);font-weight:700;font-size:14px;margin-bottom:4px;display:flex;align-items:center;gap:8px; }
+  .dp-sub   { font-size:11px;color:var(--text-dim);margin-bottom:11px;line-height:1.6; }
+  .dp-acts  { display:flex;gap:8px; }
+  .dp-acts .btn { font-size:11px;padding:10px 8px; }
+
+  /* ── Install banner ── */
+  .install-banner {
+    background:var(--surface2);border:1px solid var(--accent);border-radius:var(--radius);
+    padding:13px 15px;margin-bottom:14px;display:none;
+    align-items:center;gap:12px;
+  }
+  .install-banner.show { display:flex; }
+  .install-banner p { flex:1;font-size:11px;line-height:1.6;color:var(--text-dim); }
+  .install-banner p strong { color:var(--accent); }
+  .install-banner .btn { flex-shrink:0;padding:10px 14px;font-size:11px; }
+
+  /* ── Filter / Search ── */
+  .filter-bar { display:flex;gap:7px;margin-bottom:12px;overflow-x:auto;padding-bottom:2px; }
+  .filter-bar::-webkit-scrollbar { display:none; }
+  .chip { flex-shrink:0;padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:var(--surface);color:var(--text-dim);font-family:var(--font-mono);font-size:10px;cursor:pointer;transition:all .2s;text-transform:uppercase;letter-spacing:1px; }
+  .chip.active { background:var(--accent);color:#0a0a0a;border-color:var(--accent); }
+  .search-wrap { position:relative;margin-bottom:11px; }
+  .sicon { position:absolute;left:12px;top:50%;transform:translateY(-50%);font-size:13px; }
+  .sinput { width:100%;padding:10px 13px 10px 34px;background:var(--surface);border:1px solid var(--border);border-radius:30px;color:var(--text);font-family:var(--font-mono);font-size:12px;outline:none;transition:border-color .2s; }
+  .sinput:focus { border-color:var(--accent); }
+
+  /* ── Empty ── */
+  .empty { text-align:center;padding:50px 20px;color:var(--text-faint); }
+  .empty .ei { font-size:44px;margin-bottom:14px; }
+  .empty p { font-size:12px;line-height:1.7; }
+
+  /* ── Toast ── */
+  .toast {
+    position:fixed;bottom:calc(70px + var(--safe-bottom));left:50%;
+    transform:translateX(-50%) translateY(20px);
+    background:var(--surface2);border:1px solid var(--border);border-radius:30px;
+    padding:10px 20px;font-size:12px;z-index:200;opacity:0;
+    transition:all .3s;pointer-events:none;white-space:nowrap;max-width:90vw;text-align:center;
+  }
+  .toast.show { opacity:1;transform:translateX(-50%) translateY(0); }
+  .toast.success { border-color:var(--accent);color:var(--accent); }
+  .toast.error   { border-color:var(--danger);color:var(--danger); }
+  .toast.warn    { border-color:var(--warn);color:var(--warn); }
+
+  #file-input { display:none; }
+  ::-webkit-scrollbar { width:3px; }
+  ::-webkit-scrollbar-thumb { background:var(--border);border-radius:2px; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <header class="header">
+    <div class="header-logo">Receipt<span>Vault</span></div>
+    <div class="sync-badge" id="sync-badge">
+      <div class="sync-dot" id="sync-dot"></div>
+      <span id="sync-label">Not synced</span>
+    </div>
+  </header>
+
+  <nav class="nav-tabs">
+    <button class="tab-btn active" data-tab="scan"><span class="ti">📷</span>Scan</button>
+    <button class="tab-btn" data-tab="vault"><span class="ti">🗂</span>Vault</button>
+    <button class="tab-btn" data-tab="backup"><span class="ti">☁️</span>Backup</button>
+    <button class="tab-btn" data-tab="stats"><span class="ti">📊</span>Stats</button>
+  </nav>
+
+  <!-- SCAN -->
+  <div class="view active" id="view-scan">
+    <!-- PWA install prompt -->
+    <div class="install-banner" id="install-banner">
+      <span style="font-size:24px">📲</span>
+      <p><strong>Install Receipt Vault</strong><br>Add to your home screen for the full app experience</p>
+      <button class="btn btn-primary" id="install-btn" style="flex:0">Install</button>
+    </div>
+
+    <div class="scanner-hero" id="scanner-hero">
+      <video id="camera-preview" autoplay playsinline muted></video>
+      <canvas id="capture-canvas" style="display:none"></canvas>
+      <div class="scanner-ph" id="scanner-ph">
+        <div class="bi">🧾</div>
+        <p>Point your camera at a receipt or upload an image</p>
+      </div>
+      <div class="scan-corners"><span></span></div>
+      <div class="scan-line" id="scan-line"></div>
+      <div class="proc-ov" id="proc-ov">
+        <div class="spinner"></div>
+        <div class="proc-lbl" id="proc-lbl">Reading receipt…</div>
+      </div>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-primary" id="btn-cam"><span>📷</span> Camera</button>
+      <button class="btn" id="btn-upl"><span>📁</span> Upload</button>
+      <button class="btn btn-danger" id="btn-stop" style="display:none"><span>⏹</span> Stop</button>
+    </div>
+    <input type="file" id="file-input" accept="image/*">
+
+    <div id="scan-form" style="display:none">
+      <div class="row2">
+        <div class="fg"><label class="fl">Merchant</label><input class="fi" id="f-merchant" placeholder="e.g. Starbucks"></div>
+        <div class="fg"><label class="fl">Total ($)</label><input class="fi" id="f-total" type="number" step="0.01" placeholder="0.00"></div>
+      </div>
+      <div class="row2">
+        <div class="fg"><label class="fl">Date</label><input class="fi" id="f-date" type="date"></div>
+        <div class="fg"><label class="fl">Category</label>
+          <select class="fi" id="f-cat">
+            <option value="other">Other</option>
+            <option value="food">🍔 Food</option>
+            <option value="transport">🚗 Transport</option>
+            <option value="shopping">🛍 Shopping</option>
+            <option value="health">💊 Health</option>
+            <option value="utilities">⚡ Utilities</option>
+            <option value="entertainment">🎬 Entertainment</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label class="fl">Notes</label><input class="fi" id="f-notes" placeholder="Optional notes…"></div>
+      <button class="btn btn-primary" id="btn-save" style="width:100%">💾 Save to Vault</button>
+    </div>
+  </div>
+
+  <!-- VAULT -->
+  <div class="view" id="view-vault">
+    <div class="search-wrap"><span class="sicon">🔍</span><input class="sinput" id="search-inp" placeholder="Search receipts…"></div>
+    <div class="filter-bar">
+      <button class="chip active" data-cat="all">All</button>
+      <button class="chip" data-cat="food">Food</button>
+      <button class="chip" data-cat="transport">Transport</button>
+      <button class="chip" data-cat="shopping">Shopping</button>
+      <button class="chip" data-cat="health">Health</button>
+      <button class="chip" data-cat="utilities">Utilities</button>
+      <button class="chip" data-cat="entertainment">Entertainment</button>
+      <button class="chip" data-cat="other">Other</button>
+    </div>
+    <div id="receipt-list"></div>
+  </div>
+
+  <!-- BACKUP -->
+  <div class="view" id="view-backup">
+    <div class="dp">
+      <div class="dp-title">☁️ Google Drive Backup</div>
+      <div class="dp-sub">Receipts auto-sync to <strong>receipt-vault-backup.json</strong> in your Drive every time you save. Restore any time — even after clearing your browser.</div>
+      <div class="dp-acts">
+        <button class="btn btn-primary" id="btn-backup-now" style="flex:1">☁️ Backup Now</button>
+        <button class="btn" id="btn-restore" style="flex:1">⬇️ Restore</button>
+      </div>
+    </div>
+    <div class="dp">
+      <div class="dp-title">📥 Export Data</div>
+      <div class="dp-sub">Download a local copy of all your receipts as a JSON or CSV file.</div>
+      <div class="dp-acts">
+        <button class="btn" id="btn-json" style="flex:1">⬇️ JSON</button>
+        <button class="btn" id="btn-csv"  style="flex:1">📄 CSV</button>
+      </div>
+    </div>
+    <div class="dp">
+      <div class="dp-title" style="color:var(--danger)">🗑 Danger Zone</div>
+      <div class="dp-sub">Wipe all local receipt data. Back up to Drive first!</div>
+      <button class="btn btn-danger" id="btn-clear" style="width:100%">Clear Local Storage</button>
+    </div>
+    <div class="stat-card" style="margin-top:0">
+      <div class="mslbl" style="margin-bottom:10px">Backup Log</div>
+      <div id="backup-log" style="font-size:11px;color:var(--text-dim);line-height:2.2"></div>
+    </div>
+  </div>
+
+  <!-- STATS -->
+  <div class="view" id="view-stats">
+    <div class="stat-grid">
+      <div class="stat-card"><div class="sval" id="s-total">$0</div><div class="slbl">Total Spent</div></div>
+      <div class="stat-card"><div class="sval" id="s-count">0</div><div class="slbl">Receipts</div></div>
+      <div class="stat-card"><div class="sval" id="s-avg">$0</div><div class="slbl">Avg Receipt</div></div>
+      <div class="stat-card"><div class="sval" id="s-month">$0</div><div class="slbl">This Month</div></div>
+    </div>
+    <div class="stat-card" style="margin-bottom:12px">
+      <div class="mslbl" style="margin-bottom:11px">By Category</div>
+      <div id="bar-chart"></div>
+    </div>
+    <div class="stat-card">
+      <div class="mslbl" style="margin-bottom:11px">Recent Activity</div>
+      <div id="recent-list" style="font-size:12px;color:var(--text-dim);line-height:2.1"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-ov" id="modal-ov">
+  <div class="modal">
+    <div class="mhandle"></div>
+    <div class="mtitle" id="m-title">—</div>
+    <div class="msub"   id="m-sub">—</div>
+    <div class="msec"   id="m-img-sec" style="display:none">
+      <div class="mslbl">Scanned Image</div>
+      <img id="m-img" class="mimg" src="" alt="Receipt">
+    </div>
+    <div class="msec">
+      <div class="mslbl">Extracted Text</div>
+      <div class="ocr-text" id="m-ocr">—</div>
+    </div>
+    <div class="mactions">
+      <button class="btn btn-danger" id="m-del" style="flex:1">🗑 Delete</button>
+      <button class="btn" id="m-close">✕ Close</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════
+//  SERVICE WORKER REGISTRATION
+// ═══════════════════════════════════════════
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      console.log('SW registered:', reg.scope);
+    }).catch(err => console.warn('SW registration failed:', err));
+  });
+}
+
+// ═══════════════════════════════════════════
+//  PWA INSTALL PROMPT
+// ═══════════════════════════════════════════
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  // Show install banner if not already installed
+  if (!window.matchMedia('(display-mode: standalone)').matches) {
+    document.getElementById('install-banner').classList.add('show');
+  }
+});
+
+document.getElementById('install-btn').addEventListener('click', async () => {
+  if (!deferredInstallPrompt) return;
+  deferredInstallPrompt.prompt();
+  const { outcome } = await deferredInstallPrompt.userChoice;
+  if (outcome === 'accepted') {
+    document.getElementById('install-banner').classList.remove('show');
+    showToast('Receipt Vault installed! ✓');
+  }
+  deferredInstallPrompt = null;
+});
+
+window.addEventListener('appinstalled', () => {
+  document.getElementById('install-banner').classList.remove('show');
+  showToast('App installed successfully ✓');
+});
+
+// Handle deep links from manifest shortcuts
+const hash = location.hash.replace('#','');
+if (hash === 'vault' || hash === 'stats' || hash === 'backup') {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  const btn = document.querySelector(`[data-tab="${hash}"]`);
+  if (btn) { btn.classList.add('active'); document.getElementById('view-'+hash).classList.add('active'); }
+}
+
+// ═══════════════════════════════════════════
+//  INDEXEDDB
+// ═══════════════════════════════════════════
+const DB_NAME='ReceiptVault', STORE='receipts';
+let db;
+
+function openDB() {
+  return new Promise((res,rej) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = e => {
+      const d = e.target.result;
+      if (!d.objectStoreNames.contains(STORE)) {
+        const s = d.createObjectStore(STORE, {keyPath:'id'});
+        s.createIndex('date','date'); s.createIndex('category','category');
+      }
+    };
+    req.onsuccess = e => { db = e.target.result; res(db); };
+    req.onerror = e => rej(e.target.error);
+  });
+}
+const tx = (mode='readonly') => db.transaction(STORE,mode).objectStore(STORE);
+const saveR  = r  => new Promise((res,rej) => { const q=tx('readwrite').put(r); q.onsuccess=()=>res(r); q.onerror=e=>rej(e); });
+const allR   = () => new Promise((res,rej) => { const q=tx().getAll(); q.onsuccess=e=>res(e.target.result.sort((a,b)=>new Date(b.date)-new Date(a.date))); q.onerror=e=>rej(e); });
+const delR   = id => new Promise((res,rej) => { const q=tx('readwrite').delete(id); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+const clearR = () => new Promise((res,rej) => { const q=tx('readwrite').clear(); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+
+// ═══════════════════════════════════════════
+//  GOOGLE DRIVE BACKUP (via Claude MCP)
+// ═══════════════════════════════════════════
+const BACKUP_FILE = 'receipt-vault-backup.json';
+let backupLog = [];
+
+function logB(msg, ok=true) {
+  backupLog.unshift({ts: new Date().toLocaleTimeString(), msg, ok});
+  if (backupLog.length > 20) backupLog.pop();
+  renderLog();
+}
+function renderLog() {
+  const el = document.getElementById('backup-log');
+  if (!el) return;
+  el.innerHTML = backupLog.length
+    ? backupLog.map(l=>`<div style="color:${l.ok?'var(--text-dim)':'var(--danger)'}">${l.ts} — ${l.msg}</div>`).join('')
+    : '<div style="color:var(--text-faint)">No backup activity yet</div>';
+}
+
+async function backupToDrive(receipts) {
+  setSyncState('syncing','Syncing…');
+  try {
+    const payload = {
+      receipts: receipts.map(r => ({...r, image: r.image ? '[image]' : null})),
+      imageStore: receipts.filter(r=>r.image).reduce((a,r)=>{a[r.id]=r.image;return a;},{}),
+      exportedAt: new Date().toISOString(), version: 2
+    };
+    const content = JSON.stringify(payload, null, 2);
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514', max_tokens: 1000,
+        mcp_servers: [{type:'url', url:'https://gdrive.mcp.claude.com/mcp', name:'gdrive'}],
+        system: `You are a file manager. Use Google Drive MCP tools to save a JSON file.
+1. Search for "${BACKUP_FILE}" in Drive
+2. Update it if found, create it if not
+Respond ONLY with JSON: {"success":true,"action":"created|updated"} or {"success":false,"error":"..."}`,
+        messages: [{role:'user', content:`Save this JSON as "${BACKUP_FILE}" in Google Drive root, overwriting if it exists:\n\n${content}`}]
+      })
+    });
+    const data = await res.json();
+    const toolResults = data.content?.filter(b=>b.type==='mcp_tool_result')||[];
+    const textBlock = data.content?.find(b=>b.type==='text');
+    if (toolResults.length > 0 || (textBlock && textBlock.text.includes('success'))) {
+      setSyncState('synced','Synced');
+      logB(`Backed up ${receipts.length} receipts to Drive`);
+      try { localStorage.setItem('rv_lastSync', new Date().toISOString()); } catch(e){}
+      return true;
+    }
+    throw new Error('Unexpected response from Drive MCP');
+  } catch(e) {
+    setSyncState('error','Sync failed');
+    logB('Backup failed: ' + e.message, false);
+    return false;
+  }
+}
+
+async function restoreFromDrive() {
+  setSyncState('syncing','Restoring…');
+  showToast('Searching Drive for backup…','warn');
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514', max_tokens: 8000,
+        mcp_servers: [{type:'url', url:'https://gdrive.mcp.claude.com/mcp', name:'gdrive'}],
+        system: `You are a file retrieval assistant.
+Find "${BACKUP_FILE}" in Google Drive and return its content.
+Respond ONLY with JSON: {"success":true,"content":<parsed file JSON>} or {"success":false,"error":"..."}`,
+        messages: [{role:'user', content:`Find and return the full content of "${BACKUP_FILE}" from Google Drive.`}]
+      })
+    });
+    const data = await res.json();
+    const textBlock = data.content?.find(b=>b.type==='text');
+    if (textBlock) {
+      const jsonMatch = textBlock.text.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        const result = JSON.parse(jsonMatch[0]);
+        if (result.success && result.content) {
+          const bk = result.content;
+          const receipts = bk.receipts || [];
+          if (bk.imageStore) receipts.forEach(r => { if (bk.imageStore[r.id]) r.image = bk.imageStore[r.id]; });
+          const existing = await allR();
+          const existIds = new Set(existing.map(r=>r.id));
+          const toAdd = receipts.filter(r=>!existIds.has(r.id));
+          for (const r of toAdd) await saveR(r);
+          allReceipts = await allR();
+          updateHeader();
+          setSyncState('synced','Synced');
+          logB(`Restored ${toAdd.length} receipts (${receipts.length-toAdd.length} already present)`);
+          showToast(`Restored ${toAdd.length} receipts ✓`);
+          renderVault();
+          return;
+        }
+      }
+    }
+    throw new Error('Could not parse backup');
+  } catch(e) {
+    setSyncState('error','Restore failed');
+    logB('Restore failed: '+e.message, false);
+    showToast('Restore failed','error');
+  }
+}
+
+// ═══════════════════════════════════════════
+//  OCR
+// ═══════════════════════════════════════════
+async function ocrReceipt(b64, mime='image/jpeg') {
+  setProc(true,'Reading receipt…');
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({
+        model:'claude-sonnet-4-20250514', max_tokens:1000,
+        messages:[{role:'user', content:[
+          {type:'image', source:{type:'base64', media_type:mime, data:b64}},
+          {type:'text', text:`Extract all text and data from this receipt. Respond ONLY with JSON (no markdown):
+{"merchant":"name","total":0.00,"date":"YYYY-MM-DD","category":"food|transport|shopping|health|utilities|entertainment|other","items":["item $x"],"raw_text":"all text from receipt"}
+Use null for unknown total/date, empty string for unknown merchant.`}
+        ]}]
+      })
+    });
+    const data = await res.json();
+    const text = data.content?.find(b=>b.type==='text')?.text||'{}';
+    return JSON.parse(text.replace(/```json|```/g,'').trim());
+  } catch(e) {
+    return {merchant:'',total:null,date:null,category:'other',items:[],raw_text:'OCR failed — please fill in manually.'};
+  } finally { setProc(false); }
+}
+
+// ═══════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════
+let curImg=null, curMime='image/jpeg';
+let allReceipts=[], activeCat='all', activeSearch='';
+let detailR=null;
+
+function setProc(on,lbl='Processing…') {
+  document.getElementById('proc-ov').classList.toggle('active',on);
+  document.getElementById('scan-line').style.display=on?'block':'none';
+  document.getElementById('proc-lbl').textContent=lbl;
+}
+function setSyncState(state,lbl) {
+  const b=document.getElementById('sync-badge'), d=document.getElementById('sync-dot'), l=document.getElementById('sync-label');
+  b.className='sync-badge '+state; d.className='sync-dot '+(state==='syncing'?'pulse':''); l.textContent=lbl;
+}
+function showToast(msg,type='success') {
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className=`toast ${type} show`;
+  setTimeout(()=>t.classList.remove('show'),3000);
+}
+function updateHeader() {
+  // nothing to update in new layout but keep for compat
+}
+
+// Tabs
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('view-'+btn.dataset.tab).classList.add('active');
+    if (btn.dataset.tab==='vault') renderVault();
+    if (btn.dataset.tab==='stats') renderStats();
+    if (btn.dataset.tab==='backup') renderLog();
+  });
+});
+
+// ═══════════════════════════════════════════
+//  CAMERA
+// ═══════════════════════════════════════════
+let stream=null;
+const video=document.getElementById('camera-preview');
+const ph=document.getElementById('scanner-ph');
+const btnCam=document.getElementById('btn-cam');
+const btnStop=document.getElementById('btn-stop');
+const btnUpl=document.getElementById('btn-upl');
+const fileInp=document.getElementById('file-input');
+
+async function startCamera() {
+  try {
+    stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1920},height:{ideal:1080}}});
+    video.srcObject=stream; video.style.display='block'; ph.style.display='none';
+    btnCam.innerHTML='<span>📸</span> Capture'; btnCam.onclick=capture;
+    btnStop.style.display='flex'; btnUpl.style.display='none';
+  } catch(e) { showToast('Camera unavailable — try Upload','error'); }
+}
+function stopCamera() {
+  if(stream){stream.getTracks().forEach(t=>t.stop());stream=null;}
+  video.style.display='none'; ph.style.display='flex';
+  btnCam.innerHTML='<span>📷</span> Camera'; btnCam.onclick=startCamera;
+  btnStop.style.display='none'; btnUpl.style.display='flex';
+}
+async function capture() {
+  const c=document.getElementById('capture-canvas');
+  c.width=video.videoWidth; c.height=video.videoHeight;
+  c.getContext('2d').drawImage(video,0,0);
+  const url=c.toDataURL('image/jpeg',0.92);
+  curImg=url.split(',')[1]; curMime='image/jpeg';
+  stopCamera(); await processImg(url);
+}
+
+btnCam.addEventListener('click',startCamera);
+btnStop.addEventListener('click',stopCamera);
+btnUpl.addEventListener('click',()=>fileInp.click());
+fileInp.addEventListener('change',async e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const reader=new FileReader();
+  reader.onload=async ev=>{
+    const url=ev.target.result;
+    curMime=f.type||'image/jpeg'; curImg=url.split(',')[1];
+    await processImg(url);
+  };
+  reader.readAsDataURL(f); fileInp.value='';
+});
+
+async function processImg(url) {
+  ph.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:contain;border-radius:8px;">`;
+  ph.style.display='flex';
+  const r=await ocrReceipt(curImg,curMime);
+  document.getElementById('f-merchant').value=r.merchant||'';
+  document.getElementById('f-total').value=r.total!=null?r.total:'';
+  document.getElementById('f-date').value=r.date||new Date().toISOString().split('T')[0];
+  document.getElementById('f-cat').value=r.category||'other';
+  document.getElementById('f-notes').value=r.items?.join(', ')||'';
+  document.getElementById('btn-save').dataset.raw=r.raw_text||'';
+  document.getElementById('scan-form').style.display='block';
+  showToast('Receipt scanned ✓');
+}
+
+// ═══════════════════════════════════════════
+//  SAVE
+// ═══════════════════════════════════════════
+document.getElementById('btn-save').addEventListener('click', async () => {
+  const receipt={
+    id: Date.now().toString(),
+    merchant: document.getElementById('f-merchant').value.trim()||'Unknown',
+    total: parseFloat(document.getElementById('f-total').value)||0,
+    date: document.getElementById('f-date').value||new Date().toISOString().split('T')[0],
+    category: document.getElementById('f-cat').value,
+    notes: document.getElementById('f-notes').value.trim(),
+    rawText: document.getElementById('btn-save').dataset.raw||'',
+    image: curImg?`data:${curMime};base64,${curImg}`:null,
+    createdAt: new Date().toISOString()
+  };
+  await saveR(receipt);
+  allReceipts=await allR();
+  backupToDrive(allReceipts); // async, non-blocking
+  document.getElementById('scan-form').style.display='none';
+  ph.innerHTML=`<div class="bi">🧾</div><p>Point your camera at a receipt or upload an image</p>`;
+  curImg=null;
+  showToast('Saved & syncing to Drive ✓');
+});
+
+// ═══════════════════════════════════════════
+//  VAULT
+// ═══════════════════════════════════════════
+const CE={food:'🍔',transport:'🚗',shopping:'🛍',health:'💊',utilities:'⚡',entertainment:'🎬',other:'📌'};
+const CL={food:'Food',transport:'Transport',shopping:'Shopping',health:'Health',utilities:'Utilities',entertainment:'Entertainment',other:'Other'};
+
+function renderVault() {
+  let rs=allReceipts;
+  if(activeCat!=='all') rs=rs.filter(r=>r.category===activeCat);
+  if(activeSearch){const q=activeSearch.toLowerCase();rs=rs.filter(r=>r.merchant.toLowerCase().includes(q)||r.notes?.toLowerCase().includes(q)||r.category.includes(q));}
+  const list=document.getElementById('receipt-list');
+  if(!rs.length){list.innerHTML=`<div class="empty"><div class="ei">🧾</div><p>No receipts found.<br>Scan your first receipt to get started.</p></div>`;return;}
+  list.innerHTML=rs.map(r=>`
+    <div class="rc" data-id="${r.id}">
+      <div class="rthumb">${r.image?`<img src="${r.image}" alt="">`:(CE[r.category]||'🧾')}</div>
+      <div class="rinfo">
+        <div class="rmerch">${r.merchant}</div>
+        <div class="rmeta">${fmtDate(r.date)} · ${CL[r.category]||r.category}</div>
+        <div class="rtags"><span class="tag cat-${r.category}">${CE[r.category]} ${CL[r.category]}</span>${r.notes?`<span class="tag">${r.notes.slice(0,18)}${r.notes.length>18?'…':''}</span>`:''}</div>
+      </div>
+      <div class="ramt">$${r.total.toFixed(2)}</div>
+    </div>`).join('');
+  list.querySelectorAll('.rc').forEach(c=>c.addEventListener('click',()=>openDetail(c.dataset.id)));
+}
+
+document.querySelectorAll('.chip').forEach(c=>{
+  c.addEventListener('click',()=>{
+    document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
+    c.classList.add('active'); activeCat=c.dataset.cat; renderVault();
+  });
+});
+document.getElementById('search-inp').addEventListener('input',e=>{activeSearch=e.target.value.trim();renderVault();});
+
+// ═══════════════════════════════════════════
+//  DETAIL MODAL
+// ═══════════════════════════════════════════
+function openDetail(id) {
+  detailR=allReceipts.find(r=>r.id===id); if(!detailR)return;
+  document.getElementById('m-title').textContent=detailR.merchant;
+  document.getElementById('m-sub').textContent=`${fmtDate(detailR.date)} · $${detailR.total.toFixed(2)} · ${CL[detailR.category]||detailR.category}`;
+  const is=document.getElementById('m-img-sec'), im=document.getElementById('m-img');
+  if(detailR.image){im.src=detailR.image;is.style.display='block';}else{is.style.display='none';}
+  document.getElementById('m-ocr').textContent=detailR.rawText||detailR.notes||'No text extracted.';
+  document.getElementById('modal-ov').classList.add('open');
+}
+document.getElementById('m-close').addEventListener('click',()=>document.getElementById('modal-ov').classList.remove('open'));
+document.getElementById('modal-ov').addEventListener('click',e=>{if(e.target===document.getElementById('modal-ov'))document.getElementById('modal-ov').classList.remove('open');});
+document.getElementById('m-del').addEventListener('click',async()=>{
+  if(!detailR||!confirm(`Delete receipt from ${detailR.merchant}?`))return;
+  await delR(detailR.id); allReceipts=await allR();
+  document.getElementById('modal-ov').classList.remove('open');
+  renderVault(); backupToDrive(allReceipts); showToast('Deleted','error');
+});
+
+// ═══════════════════════════════════════════
+//  BACKUP ACTIONS
+// ═══════════════════════════════════════════
+document.getElementById('btn-backup-now').addEventListener('click',async()=>{
+  const ok=await backupToDrive(allReceipts);
+  showToast(ok?'Backed up to Drive ✓':'Backup failed','error');
+});
+document.getElementById('btn-restore').addEventListener('click',restoreFromDrive);
+document.getElementById('btn-json').addEventListener('click',()=>{
+  const blob=new Blob([JSON.stringify({receipts:allReceipts,exportedAt:new Date().toISOString()},null,2)],{type:'application/json'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`receipts-${new Date().toISOString().split('T')[0]}.json`;a.click();
+  showToast('JSON exported ✓');
+});
+document.getElementById('btn-csv').addEventListener('click',()=>{
+  const hdr='id,merchant,total,date,category,notes,createdAt';
+  const rows=allReceipts.map(r=>[r.id,`"${r.merchant}"`,r.total,r.date,r.category,`"${(r.notes||'').replace(/"/g,'""')}"`,r.createdAt].join(','));
+  const blob=new Blob([[hdr,...rows].join('\n')],{type:'text/csv'});
+  const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`receipts-${new Date().toISOString().split('T')[0]}.csv`;a.click();
+  showToast('CSV exported ✓');
+});
+document.getElementById('btn-clear').addEventListener('click',async()=>{
+  if(!confirm('Delete all local receipts? Make sure Drive backup is current!\n\nProceed?'))return;
+  await clearR(); allReceipts=[];
+  renderVault(); logB('Local storage cleared by user'); showToast('Local storage cleared','error');
+});
+
+// ═══════════════════════════════════════════
+//  STATS
+// ═══════════════════════════════════════════
+function renderStats() {
+  const rs=allReceipts, total=rs.reduce((s,r)=>s+r.total,0), count=rs.length;
+  const now=new Date();
+  const month=rs.filter(r=>{const d=new Date(r.date+'T12:00:00');return d.getMonth()===now.getMonth()&&d.getFullYear()===now.getFullYear();}).reduce((s,r)=>s+r.total,0);
+  document.getElementById('s-total').textContent='$'+total.toFixed(0);
+  document.getElementById('s-count').textContent=count;
+  document.getElementById('s-avg').textContent='$'+(count?total/count:0).toFixed(0);
+  document.getElementById('s-month').textContent='$'+month.toFixed(0);
+  const cats={};rs.forEach(r=>{cats[r.category]=(cats[r.category]||0)+r.total;});
+  const mx=Math.max(...Object.values(cats),1);
+  document.getElementById('bar-chart').innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`
+    <div class="bar-row">
+      <div class="bar-info"><span>${CE[c]||'📌'} ${CL[c]||c}</span><span style="color:var(--accent)">$${v.toFixed(2)}</span></div>
+      <div class="bar-track"><div class="bar-fill" style="width:${(v/mx*100).toFixed(1)}%"></div></div>
+    </div>`).join('')||'<p style="color:var(--text-faint);font-size:12px">No data yet</p>';
+  document.getElementById('recent-list').innerHTML=rs.slice(0,8).map(r=>`<div>${CE[r.category]} <strong style="color:var(--text)">${r.merchant}</strong> — $${r.total.toFixed(2)} <span style="color:var(--text-faint)">${fmtDate(r.date)}</span></div>`).join('')||'<p style="color:var(--text-faint)">No receipts yet</p>';
+}
+
+function fmtDate(d) {
+  if(!d)return'—';
+  return new Date(d+'T12:00:00').toLocaleDateString('en-CA',{month:'short',day:'numeric',year:'numeric'});
+}
+
+// ═══════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════
+(async()=>{
+  await openDB();
+  allReceipts=await allR();
+  // Auto-restore prompt if empty but we had a previous sync
+  const lastSync=localStorage.getItem('rv_lastSync');
+  if(allReceipts.length===0 && lastSync){
+    if(confirm('Local storage is empty but a previous Drive backup was found.\n\nRestore from Google Drive?')){
+      await restoreFromDrive();
+    }
+  } else if(lastSync){
+    setSyncState('synced','Synced '+new Date(lastSync).toLocaleDateString());
+    logB('Last sync: '+new Date(lastSync).toLocaleString());
+  }
+})();
+</script>
+</body>
+</html>
