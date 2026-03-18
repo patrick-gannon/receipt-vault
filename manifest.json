@@ -2,12 +2,12 @@
   "name": "Receipt Vault",
   "short_name": "ReceiptVault",
   "description": "Scan, store and organise your receipts with AI-powered OCR and Google Drive backup",
-  "start_url": "/index.html",
+  "start_url": "/receipt-vault/index.html",
   "display": "standalone",
   "background_color": "#0a0a0a",
   "theme_color": "#0a0a0a",
   "orientation": "portrait-primary",
-  "scope": "/",
+  "scope": "/receipt-vault/",
   "categories": ["finance", "productivity", "utilities"],
   "icons": [
     { "src": "icons/icon-72.png",  "sizes": "72x72",   "type": "image/png", "purpose": "any maskable" },
@@ -25,14 +25,14 @@
       "name": "Scan Receipt",
       "short_name": "Scan",
       "description": "Jump straight to the camera scanner",
-      "url": "/index.html#scan",
+      "url": "/receipt-vault/index.html#scan",
       "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }]
     },
     {
       "name": "My Vault",
       "short_name": "Vault",
       "description": "Browse saved receipts",
-      "url": "/index.html#vault",
+      "url": "/receipt-vault/index.html#vault",
       "icons": [{ "src": "icons/icon-96.png", "sizes": "96x96" }]
     }
   ]

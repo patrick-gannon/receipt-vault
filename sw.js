@@ -1,10 +1,10 @@
 const CACHE = 'receipt-vault-v1';
 const PRECACHE = [
-  '/',
-  '/index.html',
-  '/manifest.json',
-  '/icons/icon-192.png',
-  '/icons/icon-512.png',
+  '/receipt-vault/',
+  '/receipt-vault/index.html',
+  '/receipt-vault/manifest.json',
+  '/receipt-vault/icons/icon-192.png',
+  '/receipt-vault/icons/icon-512.png',
   'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap'
 ];
 
