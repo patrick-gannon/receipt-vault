@@ -598,20 +598,33 @@ const DEFAULT_CATS = [
 ];
 
 function openDB() {
-  return new Promise((res,rej) => {
-    const req = indexedDB.open(DB_NAME, 2);
-    req.onupgradeneeded = e => {
-      const d = e.target.result;
-      if (!d.objectStoreNames.contains(STORE)) {
-        const s = d.createObjectStore(STORE, {keyPath:'id'});
-        s.createIndex('date','date'); s.createIndex('category','category');
-      }
-      if (!d.objectStoreNames.contains(CAT_STORE)) {
-        d.createObjectStore(CAT_STORE, {keyPath:'id'});
-      }
+  return new Promise((res, rej) => {
+    // First try opening at current version to check what stores exist
+    const checkReq = indexedDB.open(DB_NAME);
+    checkReq.onsuccess = e => {
+      const tempDb = e.target.result;
+      const currentVersion = tempDb.version;
+      const hasCatStore = tempDb.objectStoreNames.contains(CAT_STORE);
+      tempDb.close();
+
+      // Open at version that adds categories store if needed
+      const targetVersion = hasCatStore ? currentVersion : currentVersion + 1;
+      const req = indexedDB.open(DB_NAME, targetVersion);
+
+      req.onupgradeneeded = e => {
+        const d = e.target.result;
+        if (!d.objectStoreNames.contains(STORE)) {
+          const s = d.createObjectStore(STORE, {keyPath:'id'});
+          s.createIndex('date','date'); s.createIndex('category','category');
+        }
+        if (!d.objectStoreNames.contains(CAT_STORE)) {
+          d.createObjectStore(CAT_STORE, {keyPath:'id'});
+        }
+      };
+      req.onsuccess = e => { db = e.target.result; res(db); };
+      req.onerror = e => rej(e.target.error);
     };
-    req.onsuccess = e => { db = e.target.result; res(db); };
-    req.onerror = e => rej(e.target.error);
+    checkReq.onerror = e => rej(e.target.error);
   });
 }
 const tx  = (mode='readonly') => db.transaction(STORE,mode).objectStore(STORE);
