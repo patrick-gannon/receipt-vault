@@ -421,7 +421,7 @@
         <div class="setting-row">
           <div>
             <div class="setting-label">Enable OCR</div>
-            <div class="setting-sub" id="ocr-sub">Requires Google Vision API setup</div>
+            <div class="setting-sub" id="ocr-sub">Uses Google Vision API — 1,000 free scans/month</div>
           </div>
           <label class="toggle">
             <input type="checkbox" id="ocr-toggle">
@@ -430,7 +430,7 @@
         </div>
       </div>
       <div style="margin-top:8px;font-size:11px;color:var(--text-faint);line-height:1.6">
-        When enabled, scanning a receipt will automatically extract the merchant, total, date and category. Google Vision API setup required — coming soon.
+      When enabled, scanning a receipt will automatically extract the merchant, total, date and category using Google Vision API. Free up to 1,000 scans/month. Requires Drive to be connected first (uses same Google account).
       </div>
     </div>
 
@@ -642,7 +642,7 @@ const delC   = id => new Promise((res,rej) => { const q=ctx('readwrite').delete(
 // ═══════════════════════════════════════════
 const BACKUP_FILE = 'receipt-vault-backup.json';
 const GOOGLE_CLIENT_ID = '552634016863-t4gilrro4jgh92d3122317rok33kkchk.apps.googleusercontent.com';
-const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/cloud-vision';
 let driveToken = null;
 let backupLog = [];
 
@@ -816,29 +816,92 @@ async function restoreFromDrive() {
 }
 
 // ═══════════════════════════════════════════
-//  OCR
+//  OCR — Google Cloud Vision
 // ═══════════════════════════════════════════
 async function ocrReceipt(b64, mime='image/jpeg') {
   setProc(true,'Reading receipt…');
   try {
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+    // Reuse the Drive OAuth token — request Vision scope if needed
+    const token = await getToken();
+
+    const res = await fetch('https://vision.googleapis.com/v1/images:annotate', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model:'claude-sonnet-4-20250514', max_tokens:1000,
-        messages:[{role:'user', content:[
-          {type:'image', source:{type:'base64', media_type:mime, data:b64}},
-          {type:'text', text:`Extract all text and data from this receipt. Respond ONLY with JSON (no markdown):
-{"merchant":"name","total":0.00,"date":"YYYY-MM-DD","category":"food|transport|shopping|health|utilities|entertainment|other","items":["item $x"],"raw_text":"all text from receipt"}
-Use null for unknown total/date, empty string for unknown merchant.`}
-        ]}]
+        requests: [{
+          image: { content: b64 },
+          features: [{ type: 'TEXT_DETECTION', maxResults: 1 }]
+        }]
       })
     });
+
     const data = await res.json();
-    const text = data.content?.find(b=>b.type==='text')?.text||'{}';
-    return JSON.parse(text.replace(/```json|```/g,'').trim());
+    const rawText = data.responses?.[0]?.fullTextAnnotation?.text || '';
+    if (!rawText) throw new Error('No text found in image');
+
+    // Parse the raw text into structured fields
+    const parsed = parseReceiptText(rawText);
+    return { ...parsed, raw_text: rawText };
+
   } catch(e) {
-    return {merchant:'',total:null,date:null,category:'other',items:[],raw_text:'OCR failed — please fill in manually.'};
-  } finally { setProc(false); }
+    console.error('OCR error:', e);
+    return { merchant:'', total:null, date:null, category:'other', items:[], raw_text:'OCR failed — please fill in manually.' };
+  } finally {
+    setProc(false);
+  }
+}
+
+function parseReceiptText(text) {
+  const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+
+  // Merchant — usually the first non-empty line
+  const merchant = lines[0] || '';
+
+  // Total — look for largest dollar amount near keywords
+  let total = null;
+  const totalPatterns = [
+    /(?:total|amount due|balance due|grand total)[^\d]*\$?([\d,]+\.?\d{0,2})/i,
+    /\$?([\d,]+\.\d{2})\s*(?:total|due|paid)/i,
+  ];
+  for (const pat of totalPatterns) {
+    const m = text.match(pat);
+    if (m) { total = parseFloat(m[1].replace(',','')); break; }
+  }
+  // Fallback: largest dollar amount in the text
+  if (total === null) {
+    const amounts = [...text.matchAll(/\$?([\d]+\.\d{2})/g)]
+      .map(m => parseFloat(m[1]))
+      .filter(n => n > 0);
+    if (amounts.length) total = Math.max(...amounts);
+  }
+
+  // Date — look for common date formats
+  let date = null;
+  const datePatterns = [
+    /(\d{4}[-\/]\d{2}[-\/]\d{2})/,
+    /(\d{2}[-\/]\d{2}[-\/]\d{4})/,
+    /(\d{2}[-\/]\d{2}[-\/]\d{2})/,
+    /(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\.?\s+\d{1,2},?\s+\d{4}/i,
+  ];
+  for (const pat of datePatterns) {
+    const m = text.match(pat);
+    if (m) {
+      const d = new Date(m[0]);
+      if (!isNaN(d)) { date = d.toISOString().split('T')[0]; break; }
+    }
+  }
+
+  // Category — keyword matching
+  const lower = text.toLowerCase();
+  let category = 'other';
+  if (/restaurant|cafe|coffee|pizza|burger|sushi|bar|grill|diner|bakery|food|eat|drink|menu/.test(lower)) category = 'food';
+  else if (/gas|fuel|parking|uber|lyft|taxi|transit|airline|flight|train|bus/.test(lower)) category = 'transport';
+  else if (/pharmacy|drug|clinic|hospital|doctor|dental|medical|health|rx/.test(lower)) category = 'health';
+  else if (/electric|hydro|water|internet|phone|utility|bell|rogers|telus/.test(lower)) category = 'utilities';
+  else if (/cinema|movie|theatre|netflix|spotify|concert|ticket|game/.test(lower)) category = 'entertainment';
+  else if (/amazon|walmart|target|costco|shop|store|mall|market/.test(lower)) category = 'shopping';
+
+  return { merchant, total, date, category, items: [] };
 }
 
 // ═══════════════════════════════════════════
@@ -948,19 +1011,26 @@ function compressImage(dataURL, maxWidth=800, quality=0.7) {
 async function processImg(url) {
   ph.innerHTML=`<img src="${url}" style="width:100%;height:100%;object-fit:contain;border-radius:8px;">`;
   ph.style.display='flex';
-  // Compress image before OCR and storage
   const compressed = await compressImage(url);
   curImg = compressed.split(',')[1];
   curMime = 'image/jpeg';
-  const r=await ocrReceipt(curImg,curMime);
-  document.getElementById('f-merchant').value=r.merchant||'';
-  document.getElementById('f-total').value=r.total!=null?r.total:'';
-  document.getElementById('f-date').value=r.date||new Date().toISOString().split('T')[0];
-  document.getElementById('f-cat').value=r.category||'other';
-  document.getElementById('f-notes').value=r.items?.join(', ')||'';
-  document.getElementById('btn-save').dataset.raw=r.raw_text||'';
-  document.getElementById('scan-form').style.display='block';
-  showToast('Receipt scanned ✓');
+
+  const ocrEnabled = localStorage.getItem('rv_ocr') === 'true';
+  if (ocrEnabled) {
+    const r = await ocrReceipt(curImg, curMime);
+    document.getElementById('f-merchant').value = r.merchant || '';
+    document.getElementById('f-total').value    = r.total != null ? r.total : '';
+    document.getElementById('f-date').value     = r.date || new Date().toISOString().split('T')[0];
+    document.getElementById('f-cat').value      = r.category || 'other';
+    document.getElementById('f-notes').value    = r.items?.join(', ') || '';
+    document.getElementById('btn-save').dataset.raw = r.raw_text || '';
+    showToast('Receipt scanned ✓');
+  } else {
+    document.getElementById('f-date').value = new Date().toISOString().split('T')[0];
+    document.getElementById('btn-save').dataset.raw = '';
+    showToast('Image captured — fill in details');
+  }
+  document.getElementById('scan-form').style.display = 'block';
 }
 
 // ═══════════════════════════════════════════
