@@ -1,4 +1,4 @@
-const CACHE = 'receipt-vault-v1';
+const CACHE = 'receipt-vault-v4';
 const PRECACHE = [
   '/receipt-vault/',
   '/receipt-vault/index.html',
@@ -7,6 +7,11 @@ const PRECACHE = [
   '/receipt-vault/icons/icon-512.png',
   'https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@300;400;500&display=swap'
 ];
+
+// Force activate when told to skip waiting
+self.addEventListener('message', e => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+});
 
 // Install — pre-cache shell
 self.addEventListener('install', e => {
