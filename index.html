@@ -399,19 +399,52 @@
 <div class="modal-ov" id="modal-ov">
   <div class="modal">
     <div class="mhandle"></div>
-    <div class="mtitle" id="m-title">—</div>
-    <div class="msub"   id="m-sub">—</div>
-    <div class="msec"   id="m-img-sec" style="display:none">
-      <div class="mslbl">Scanned Image</div>
-      <img id="m-img" class="mimg" src="" alt="Receipt">
+
+    <!-- VIEW MODE -->
+    <div id="modal-view">
+      <div class="mtitle" id="m-title">—</div>
+      <div class="msub"   id="m-sub">—</div>
+      <div class="msec"   id="m-img-sec" style="display:none">
+        <div class="mslbl">Scanned Image</div>
+        <img id="m-img" class="mimg" src="" alt="Receipt">
+      </div>
+      <div class="msec">
+        <div class="mslbl">Extracted Text</div>
+        <div class="ocr-text" id="m-ocr">—</div>
+      </div>
+      <div class="mactions">
+        <button class="btn btn-primary" id="m-edit" style="flex:1">✏️ Edit</button>
+        <button class="btn btn-danger" id="m-del" style="flex:1">🗑 Delete</button>
+        <button class="btn" id="m-close">✕</button>
+      </div>
     </div>
-    <div class="msec">
-      <div class="mslbl">Extracted Text</div>
-      <div class="ocr-text" id="m-ocr">—</div>
-    </div>
-    <div class="mactions">
-      <button class="btn btn-danger" id="m-del" style="flex:1">🗑 Delete</button>
-      <button class="btn" id="m-close">✕ Close</button>
+
+    <!-- EDIT MODE -->
+    <div id="modal-edit" style="display:none">
+      <div class="mslbl" style="margin-bottom:12px">Edit Receipt</div>
+      <div class="row2">
+        <div class="fg"><label class="fl">Merchant</label><input class="fi" id="e-merchant"></div>
+        <div class="fg"><label class="fl">Total ($)</label><input class="fi" id="e-total" type="number" step="0.01"></div>
+      </div>
+      <div class="row2">
+        <div class="fg"><label class="fl">Date</label><input class="fi" id="e-date" type="date"></div>
+        <div class="fg"><label class="fl">Category</label>
+          <select class="fi" id="e-cat">
+            <option value="other">Other</option>
+            <option value="food">🍔 Food</option>
+            <option value="transport">🚗 Transport</option>
+            <option value="shopping">🛍 Shopping</option>
+            <option value="health">💊 Health</option>
+            <option value="utilities">⚡ Utilities</option>
+            <option value="entertainment">🎬 Entertainment</option>
+          </select>
+        </div>
+      </div>
+      <div class="fg"><label class="fl">Notes</label><input class="fi" id="e-notes"></div>
+      <div class="mactions">
+        <button class="btn btn-primary" id="m-save-edit" style="flex:1">💾 Save</button>
+        <button class="btn" id="m-cancel-edit" style="flex:1">✕ Cancel</button>
+      </div>
     </div>
   </div>
 </div>
@@ -875,13 +908,50 @@ document.getElementById('search-inp').addEventListener('input',e=>{activeSearch=
 // ═══════════════════════════════════════════
 function openDetail(id) {
   detailR=allReceipts.find(r=>r.id===id); if(!detailR)return;
-  document.getElementById('m-title').textContent=detailR.merchant;
-  document.getElementById('m-sub').textContent=`${fmtDate(detailR.date)} · $${detailR.total.toFixed(2)} · ${CL[detailR.category]||detailR.category}`;
-  const is=document.getElementById('m-img-sec'), im=document.getElementById('m-img');
-  if(detailR.image){im.src=detailR.image;is.style.display='block';}else{is.style.display='none';}
-  document.getElementById('m-ocr').textContent=detailR.rawText||detailR.notes||'No text extracted.';
+  showModalView();
   document.getElementById('modal-ov').classList.add('open');
 }
+
+function showModalView() {
+  const r = detailR;
+  document.getElementById('modal-view').style.display='block';
+  document.getElementById('modal-edit').style.display='none';
+  document.getElementById('m-title').textContent=r.merchant;
+  document.getElementById('m-sub').textContent=`${fmtDate(r.date)} · $${r.total.toFixed(2)} · ${CL[r.category]||r.category}`;
+  const is=document.getElementById('m-img-sec'), im=document.getElementById('m-img');
+  if(r.image){im.src=r.image;is.style.display='block';}else{is.style.display='none';}
+  document.getElementById('m-ocr').textContent=r.rawText||r.notes||'No text extracted.';
+}
+
+function showModalEdit() {
+  const r = detailR;
+  document.getElementById('modal-view').style.display='none';
+  document.getElementById('modal-edit').style.display='block';
+  document.getElementById('e-merchant').value=r.merchant;
+  document.getElementById('e-total').value=r.total;
+  document.getElementById('e-date').value=r.date;
+  document.getElementById('e-cat').value=r.category;
+  document.getElementById('e-notes').value=r.notes||'';
+}
+
+document.getElementById('m-edit').addEventListener('click', showModalEdit);
+document.getElementById('m-cancel-edit').addEventListener('click', showModalView);
+
+document.getElementById('m-save-edit').addEventListener('click', async () => {
+  if (!detailR) return;
+  detailR.merchant = document.getElementById('e-merchant').value.trim() || 'Unknown';
+  detailR.total    = parseFloat(document.getElementById('e-total').value) || 0;
+  detailR.date     = document.getElementById('e-date').value;
+  detailR.category = document.getElementById('e-cat').value;
+  detailR.notes    = document.getElementById('e-notes').value.trim();
+  await saveR(detailR);
+  allReceipts = await allR();
+  showModalView();
+  renderVault();
+  backupToDrive(allReceipts);
+  showToast('Receipt updated ✓');
+});
+
 document.getElementById('m-close').addEventListener('click',()=>document.getElementById('modal-ov').classList.remove('open'));
 document.getElementById('modal-ov').addEventListener('click',e=>{if(e.target===document.getElementById('modal-ov'))document.getElementById('modal-ov').classList.remove('open');});
 document.getElementById('m-del').addEventListener('click',async()=>{
