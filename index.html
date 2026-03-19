@@ -252,7 +252,33 @@
   .toast.error   { border-color:var(--danger);color:var(--danger); }
   .toast.warn    { border-color:var(--warn);color:var(--warn); }
 
-  #file-input { display:none; }
+  /* ── Settings / Categories ── */
+  .setting-row { display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid var(--border); }
+  .setting-row:last-child { border-bottom:none; }
+  .setting-label { font-size:13px; }
+  .setting-sub { font-size:11px;color:var(--text-dim);margin-top:2px; }
+  .toggle { position:relative;width:44px;height:24px;flex-shrink:0; }
+  .toggle input { opacity:0;width:0;height:0; }
+  .toggle-slider { position:absolute;inset:0;background:var(--border);border-radius:12px;cursor:pointer;transition:.3s; }
+  .toggle-slider::before { content:'';position:absolute;width:18px;height:18px;left:3px;top:3px;background:var(--text-dim);border-radius:50%;transition:.3s; }
+  .toggle input:checked + .toggle-slider { background:var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform:translateX(20px);background:#0a0a0a; }
+  .cat-item { display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;cursor:grab; }
+  .cat-item:active { cursor:grabbing;border-color:var(--accent); }
+  .cat-drag { color:var(--text-faint);font-size:16px;cursor:grab;flex-shrink:0; }
+  .cat-emoji { font-size:20px;flex-shrink:0;min-width:28px;text-align:center; }
+  .cat-name { flex:1;font-size:13px; }
+  .cat-actions { display:flex;gap:6px;flex-shrink:0; }
+  .cat-btn { background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:11px;color:var(--text-dim);cursor:pointer;transition:all .2s; }
+  .cat-btn:hover { border-color:var(--accent);color:var(--accent); }
+  .cat-btn.del { border-color:transparent; }
+  .cat-btn.del:hover { border-color:var(--danger);color:var(--danger); }
+  .cat-builtin { font-size:9px;color:var(--text-faint);letter-spacing:1px;text-transform:uppercase; }
+  .emoji-grid { display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;margin-bottom:10px; }
+  .emoji-opt { font-size:22px;cursor:pointer;padding:4px;border-radius:6px;border:2px solid transparent;transition:all .15s; }
+  .emoji-opt:hover,.emoji-opt.selected { border-color:var(--accent);background:var(--surface2); }
+  .add-cat-form { background:var(--surface2);border:1px solid var(--border);border-radius:var(--radius);padding:14px;margin-bottom:12px;display:none; }
+  .add-cat-form.open { display:block; }
   ::-webkit-scrollbar { width:3px; }
   ::-webkit-scrollbar-thumb { background:var(--border);border-radius:2px; }
 </style>
@@ -273,6 +299,7 @@
     <button class="tab-btn" data-tab="vault"><span class="ti">🗂</span>Vault</button>
     <button class="tab-btn" data-tab="backup"><span class="ti">☁️</span>Backup</button>
     <button class="tab-btn" data-tab="stats"><span class="ti">📊</span>Stats</button>
+    <button class="tab-btn" data-tab="settings"><span class="ti">⚙️</span>Settings</button>
   </nav>
 
   <!-- SCAN -->
@@ -333,16 +360,7 @@
   <!-- VAULT -->
   <div class="view" id="view-vault">
     <div class="search-wrap"><span class="sicon">🔍</span><input class="sinput" id="search-inp" placeholder="Search receipts…"></div>
-    <div class="filter-bar">
-      <button class="chip active" data-cat="all">All</button>
-      <button class="chip" data-cat="food">Food</button>
-      <button class="chip" data-cat="transport">Transport</button>
-      <button class="chip" data-cat="shopping">Shopping</button>
-      <button class="chip" data-cat="health">Health</button>
-      <button class="chip" data-cat="utilities">Utilities</button>
-      <button class="chip" data-cat="entertainment">Entertainment</button>
-      <button class="chip" data-cat="other">Other</button>
-    </div>
+    <div class="filter-bar" id="filter-bar"></div>
     <div id="receipt-list"></div>
   </div>
 
@@ -393,9 +411,55 @@
       <div id="recent-list" style="font-size:12px;color:var(--text-dim);line-height:2.1"></div>
     </div>
   </div>
-</div>
+  <!-- SETTINGS -->
+  <div class="view" id="view-settings">
 
-<!-- DETAIL MODAL -->
+    <!-- OCR Toggle -->
+    <div class="dp">
+      <div class="dp-title">🔍 OCR — Auto-read Receipts</div>
+      <div class="stat-card" style="padding:0 4px;background:none;border:none">
+        <div class="setting-row">
+          <div>
+            <div class="setting-label">Enable OCR</div>
+            <div class="setting-sub" id="ocr-sub">Requires Google Vision API setup</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="ocr-toggle">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--text-faint);line-height:1.6">
+        When enabled, scanning a receipt will automatically extract the merchant, total, date and category. Google Vision API setup required — coming soon.
+      </div>
+    </div>
+
+    <!-- Categories -->
+    <div class="dp">
+      <div class="dp-title" style="justify-content:space-between">
+        <span>🏷 Categories</span>
+        <button class="cat-btn" id="btn-add-cat" style="font-size:12px;padding:5px 10px;border-color:var(--accent);color:var(--accent)">+ Add</button>
+      </div>
+
+      <!-- Add category form -->
+      <div class="add-cat-form" id="add-cat-form">
+        <div class="fl" style="margin-bottom:6px">Category Name</div>
+        <input class="fi" id="new-cat-name" placeholder="e.g. Groceries" style="margin-bottom:10px">
+        <div class="fl" style="margin-bottom:6px">Emoji</div>
+        <input class="fi" id="new-cat-emoji" placeholder="Tap to type or pick below" maxlength="2" style="margin-bottom:8px;font-size:20px;text-align:center">
+        <div class="emoji-grid" id="emoji-grid"></div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn btn-primary" id="btn-save-cat" style="flex:1;padding:10px">💾 Save</button>
+          <button class="btn" id="btn-cancel-cat" style="padding:10px 14px">✕</button>
+        </div>
+      </div>
+
+      <!-- Category list -->
+      <div id="cat-list" style="margin-top:8px"></div>
+    </div>
+
+  </div>
+</div>
 <div class="modal-ov" id="modal-ov">
   <div class="modal">
     <div class="mhandle"></div>
@@ -517,30 +581,48 @@ if (hash === 'vault' || hash === 'stats' || hash === 'backup') {
 }
 
 // ═══════════════════════════════════════════
-//  INDEXEDDB
+//  INDEXEDDB — v2 with categories store
 // ═══════════════════════════════════════════
-const DB_NAME='ReceiptVault', STORE='receipts';
+const DB_NAME='ReceiptVault', STORE='receipts', CAT_STORE='categories';
 let db;
+
+const DEFAULT_CATS = [
+  {id:'food',        emoji:'🍔', name:'Food',          order:0, builtin:true},
+  {id:'transport',   emoji:'🚗', name:'Transport',     order:1, builtin:true},
+  {id:'shopping',    emoji:'🛍', name:'Shopping',      order:2, builtin:true},
+  {id:'health',      emoji:'💊', name:'Health',        order:3, builtin:true},
+  {id:'utilities',   emoji:'⚡', name:'Utilities',     order:4, builtin:true},
+  {id:'entertainment',emoji:'🎬',name:'Entertainment', order:5, builtin:true},
+  {id:'other',       emoji:'📌', name:'Other',         order:6, builtin:true},
+  {id:'uncategorized',emoji:'❓',name:'Uncategorized', order:99,builtin:true},
+];
 
 function openDB() {
   return new Promise((res,rej) => {
-    const req = indexedDB.open(DB_NAME, 1);
+    const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = e => {
       const d = e.target.result;
       if (!d.objectStoreNames.contains(STORE)) {
         const s = d.createObjectStore(STORE, {keyPath:'id'});
         s.createIndex('date','date'); s.createIndex('category','category');
       }
+      if (!d.objectStoreNames.contains(CAT_STORE)) {
+        d.createObjectStore(CAT_STORE, {keyPath:'id'});
+      }
     };
     req.onsuccess = e => { db = e.target.result; res(db); };
     req.onerror = e => rej(e.target.error);
   });
 }
-const tx = (mode='readonly') => db.transaction(STORE,mode).objectStore(STORE);
-const saveR  = r  => new Promise((res,rej) => { const q=tx('readwrite').put(r); q.onsuccess=()=>res(r); q.onerror=e=>rej(e); });
+const tx  = (mode='readonly') => db.transaction(STORE,mode).objectStore(STORE);
+const ctx = (mode='readonly') => db.transaction(CAT_STORE,mode).objectStore(CAT_STORE);
+const saveR  = r => new Promise((res,rej) => { const q=tx('readwrite').put(r); q.onsuccess=()=>res(r); q.onerror=e=>rej(e); });
 const allR   = () => new Promise((res,rej) => { const q=tx().getAll(); q.onsuccess=e=>res(e.target.result.sort((a,b)=>new Date(b.date)-new Date(a.date))); q.onerror=e=>rej(e); });
 const delR   = id => new Promise((res,rej) => { const q=tx('readwrite').delete(id); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
 const clearR = () => new Promise((res,rej) => { const q=tx('readwrite').clear(); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
+const saveC  = c => new Promise((res,rej) => { const q=ctx('readwrite').put(c); q.onsuccess=()=>res(c); q.onerror=e=>rej(e); });
+const allC   = () => new Promise((res,rej) => { const q=ctx().getAll(); q.onsuccess=e=>res(e.target.result.sort((a,b)=>a.order-b.order)); q.onerror=e=>rej(e); });
+const delC   = id => new Promise((res,rej) => { const q=ctx('readwrite').delete(id); q.onsuccess=()=>res(); q.onerror=e=>rej(e); });
 
 // ═══════════════════════════════════════════
 //  GOOGLE DRIVE BACKUP (OAuth 2.0 implicit flow)
@@ -639,7 +721,8 @@ async function backupToDrive(receipts) {
     const payload = {
       receipts: receipts.map(r => ({...r, image: r.image ? '[image]' : null})),
       imageStore: receipts.filter(r=>r.image).reduce((a,r)=>{a[r.id]=r.image;return a;},{}),
-      exportedAt: new Date().toISOString(), version: 2
+      categories: allCats,
+      exportedAt: new Date().toISOString(), version: 3
     };
     const content = JSON.stringify(payload, null, 2);
     const blob = new Blob([content], {type:'application/json'});
@@ -694,6 +777,12 @@ async function restoreFromDrive() {
     const bk = await res.json();
     const receipts = bk.receipts || [];
     if (bk.imageStore) receipts.forEach(r => { if (bk.imageStore[r.id]) r.image = bk.imageStore[r.id]; });
+    // Restore custom categories
+    if (bk.categories) {
+      for(const c of bk.categories.filter(c=>!c.builtin)) await saveC(c);
+      allCats = await allC();
+      populateCatSelects(); renderFilterChips();
+    }
 
     const existing = await allR();
     const existIds = new Set(existing.map(r=>r.id));
@@ -774,6 +863,7 @@ document.querySelectorAll('.tab-btn').forEach(btn => {
     if (btn.dataset.tab==='vault') renderVault();
     if (btn.dataset.tab==='stats') renderStats();
     if (btn.dataset.tab==='backup') renderLog();
+    if (btn.dataset.tab==='settings') { renderCatList(); renderEmojiGrid(); }
   });
 });
 
@@ -885,10 +975,167 @@ document.getElementById('btn-save').addEventListener('click', async () => {
 });
 
 // ═══════════════════════════════════════════
+//  CATEGORIES — dynamic lookup
+// ═══════════════════════════════════════════
+let allCats = [];
+
+function catEmoji(id) { return allCats.find(c=>c.id===id)?.emoji || '📌'; }
+function catName(id)  { return allCats.find(c=>c.id===id)?.name  || id; }
+
+function populateCatSelects() {
+  const opts = allCats
+    .filter(c=>c.id!=='uncategorized')
+    .map(c=>`<option value="${c.id}">${c.emoji} ${c.name}</option>`)
+    .join('');
+  ['f-cat','e-cat'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.innerHTML=opts;
+  });
+}
+
+function renderFilterChips() {
+  const bar = document.getElementById('filter-bar');
+  bar.innerHTML = `<button class="chip ${activeCat==='all'?'active':''}" data-cat="all">All</button>`
+    + allCats.map(c=>`<button class="chip ${activeCat===c.id?'active':''}" data-cat="${c.id}">${c.emoji} ${c.name}</button>`).join('');
+  bar.querySelectorAll('.chip').forEach(ch=>{
+    ch.addEventListener('click',()=>{
+      bar.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
+      ch.classList.add('active'); activeCat=ch.dataset.cat; renderVault();
+    });
+  });
+}
+
+// ─── Settings UI ───
+const EMOJI_PICKS = ['🍕','🍔','🥗','☕','🍺','🛒','🛍','👗','💄','🏠','🔧','💡','🚗','⛽','🚌','✈️','🏥','💊','🏋️','📚','🎬','🎮','🎵','🏖','💼','📱','💻','🖨','🐾','🎁','💰','📦','🧾','🏦','🌿','🧴'];
+
+function renderEmojiGrid(selectedEmoji='') {
+  const grid = document.getElementById('emoji-grid');
+  grid.innerHTML = EMOJI_PICKS.map(e=>`<span class="emoji-opt${e===selectedEmoji?' selected':''}" data-e="${e}">${e}</span>`).join('');
+  grid.querySelectorAll('.emoji-opt').forEach(el=>{
+    el.addEventListener('click',()=>{
+      grid.querySelectorAll('.emoji-opt').forEach(x=>x.classList.remove('selected'));
+      el.classList.add('selected');
+      document.getElementById('new-cat-emoji').value=el.dataset.e;
+    });
+  });
+}
+
+let editingCatId = null;
+
+function renderCatList() {
+  const list = document.getElementById('cat-list');
+  list.innerHTML = allCats.map(c=>`
+    <div class="cat-item" draggable="true" data-id="${c.id}">
+      <span class="cat-drag">⠿</span>
+      <span class="cat-emoji">${c.emoji}</span>
+      <span class="cat-name">${c.name}</span>
+      ${c.builtin ? '<span class="cat-builtin">built-in</span>' : ''}
+      <div class="cat-actions">
+        <button class="cat-btn" data-edit="${c.id}">✏️</button>
+        ${!c.builtin ? `<button class="cat-btn del" data-del="${c.id}">🗑</button>` : ''}
+      </div>
+    </div>`).join('');
+
+  // Edit buttons
+  list.querySelectorAll('[data-edit]').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      const cat = allCats.find(c=>c.id===btn.dataset.edit);
+      if(!cat)return;
+      editingCatId = cat.id;
+      document.getElementById('new-cat-name').value = cat.name;
+      document.getElementById('new-cat-emoji').value = cat.emoji;
+      renderEmojiGrid(cat.emoji);
+      document.getElementById('add-cat-form').classList.add('open');
+      document.getElementById('new-cat-name').focus();
+    });
+  });
+
+  // Delete buttons
+  list.querySelectorAll('[data-del]').forEach(btn=>{
+    btn.addEventListener('click', async ()=>{
+      const id = btn.dataset.del;
+      const cat = allCats.find(c=>c.id===id);
+      if(!cat||!confirm(`Delete category "${cat.name}"?\n\nAll receipts using it will become Uncategorized.`))return;
+      // Reassign receipts
+      const affected = allReceipts.filter(r=>r.category===id);
+      for(const r of affected){ r.category='uncategorized'; await saveR(r); }
+      allReceipts = await allR();
+      await delC(id);
+      allCats = await allC();
+      renderCatList(); renderFilterChips(); populateCatSelects(); renderVault();
+      showToast(`"${cat.name}" deleted — ${affected.length} receipts uncategorized`,'warn');
+    });
+  });
+
+  // Drag to reorder
+  let dragId=null;
+  list.querySelectorAll('.cat-item').forEach(item=>{
+    item.addEventListener('dragstart',()=>{ dragId=item.dataset.id; item.style.opacity='.4'; });
+    item.addEventListener('dragend',()=>{ item.style.opacity='1'; });
+    item.addEventListener('dragover',e=>{ e.preventDefault(); });
+    item.addEventListener('drop',async()=>{
+      if(!dragId||dragId===item.dataset.id)return;
+      const fromIdx=allCats.findIndex(c=>c.id===dragId);
+      const toIdx=allCats.findIndex(c=>c.id===item.dataset.id);
+      const moved=allCats.splice(fromIdx,1)[0];
+      allCats.splice(toIdx,0,moved);
+      allCats.forEach((c,i)=>{c.order=i;});
+      for(const c of allCats) await saveC(c);
+      renderCatList(); renderFilterChips(); populateCatSelects();
+    });
+  });
+}
+
+document.getElementById('btn-add-cat').addEventListener('click',()=>{
+  editingCatId=null;
+  document.getElementById('new-cat-name').value='';
+  document.getElementById('new-cat-emoji').value='';
+  renderEmojiGrid();
+  document.getElementById('add-cat-form').classList.toggle('open');
+});
+document.getElementById('btn-cancel-cat').addEventListener('click',()=>{
+  document.getElementById('add-cat-form').classList.remove('open');
+  editingCatId=null;
+});
+
+document.getElementById('btn-save-cat').addEventListener('click', async ()=>{
+  const name  = document.getElementById('new-cat-name').value.trim();
+  const emoji = document.getElementById('new-cat-emoji').value.trim() || '📌';
+  if(!name){ showToast('Please enter a category name','error'); return; }
+
+  if(editingCatId) {
+    // Edit existing
+    const cat = allCats.find(c=>c.id===editingCatId);
+    if(cat){ cat.name=name; cat.emoji=emoji; await saveC(cat); }
+    // Update any receipts referencing this category (for display refresh)
+  } else {
+    // New category
+    const id = name.toLowerCase().replace(/[^a-z0-9]/g,'_') + '_' + Date.now();
+    const order = allCats.length;
+    await saveC({id, emoji, name, order, builtin:false});
+  }
+
+  allCats = await allC();
+  renderCatList(); renderFilterChips(); populateCatSelects();
+  document.getElementById('add-cat-form').classList.remove('open');
+  editingCatId=null;
+  showToast(editingCatId ? 'Category updated ✓' : 'Category added ✓');
+  backupToDrive(allReceipts);
+});
+
+// OCR toggle
+const ocrToggle = document.getElementById('ocr-toggle');
+ocrToggle.checked = localStorage.getItem('rv_ocr')==='true';
+ocrToggle.addEventListener('change',()=>{
+  localStorage.setItem('rv_ocr', ocrToggle.checked);
+  document.getElementById('ocr-sub').textContent = ocrToggle.checked
+    ? 'OCR enabled — Google Vision setup required'
+    : 'Requires Google Vision API setup';
+  showToast(ocrToggle.checked?'OCR enabled':'OCR disabled');
+});
+
+// ═══════════════════════════════════════════
 //  VAULT
 // ═══════════════════════════════════════════
-const CE={food:'🍔',transport:'🚗',shopping:'🛍',health:'💊',utilities:'⚡',entertainment:'🎬',other:'📌'};
-const CL={food:'Food',transport:'Transport',shopping:'Shopping',health:'Health',utilities:'Utilities',entertainment:'Entertainment',other:'Other'};
 
 function renderVault() {
   let rs=allReceipts;
@@ -898,23 +1145,17 @@ function renderVault() {
   if(!rs.length){list.innerHTML=`<div class="empty"><div class="ei">🧾</div><p>No receipts found.<br>Scan your first receipt to get started.</p></div>`;return;}
   list.innerHTML=rs.map(r=>`
     <div class="rc" data-id="${r.id}">
-      <div class="rthumb">${r.image?`<img src="${r.image}" alt="">`:(CE[r.category]||'🧾')}</div>
+      <div class="rthumb">${r.image?`<img src="${r.image}" alt="">`:(catEmoji(r.category))}</div>
       <div class="rinfo">
         <div class="rmerch">${r.merchant}</div>
-        <div class="rmeta">${fmtDate(r.date)} · ${CL[r.category]||r.category}</div>
-        <div class="rtags"><span class="tag cat-${r.category}">${CE[r.category]} ${CL[r.category]}</span>${r.notes?`<span class="tag">${r.notes.slice(0,18)}${r.notes.length>18?'…':''}</span>`:''}</div>
+        <div class="rmeta">${fmtDate(r.date)} · ${catName(r.category)}</div>
+        <div class="rtags"><span class="tag">${catEmoji(r.category)} ${catName(r.category)}</span>${r.notes?`<span class="tag">${r.notes.slice(0,18)}${r.notes.length>18?'…':''}</span>`:''}</div>
       </div>
       <div class="ramt">$${r.total.toFixed(2)}</div>
     </div>`).join('');
   list.querySelectorAll('.rc').forEach(c=>c.addEventListener('click',()=>openDetail(c.dataset.id)));
 }
 
-document.querySelectorAll('.chip').forEach(c=>{
-  c.addEventListener('click',()=>{
-    document.querySelectorAll('.chip').forEach(x=>x.classList.remove('active'));
-    c.classList.add('active'); activeCat=c.dataset.cat; renderVault();
-  });
-});
 document.getElementById('search-inp').addEventListener('input',e=>{activeSearch=e.target.value.trim();renderVault();});
 
 // ═══════════════════════════════════════════
@@ -931,7 +1172,7 @@ function showModalView() {
   document.getElementById('modal-view').style.display='block';
   document.getElementById('modal-edit').style.display='none';
   document.getElementById('m-title').textContent=r.merchant;
-  document.getElementById('m-sub').textContent=`${fmtDate(r.date)} · $${r.total.toFixed(2)} · ${CL[r.category]||r.category}`;
+  document.getElementById('m-sub').textContent=`${fmtDate(r.date)} · $${r.total.toFixed(2)} · ${catName(r.category)}`;
   const is=document.getElementById('m-img-sec'), im=document.getElementById('m-img');
   if(r.image){im.src=r.image;is.style.display='block';}else{is.style.display='none';}
   document.getElementById('m-ocr').textContent=r.rawText||r.notes||'No text extracted.';
@@ -1026,10 +1267,10 @@ function renderStats() {
   const mx=Math.max(...Object.values(cats),1);
   document.getElementById('bar-chart').innerHTML=Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v])=>`
     <div class="bar-row">
-      <div class="bar-info"><span>${CE[c]||'📌'} ${CL[c]||c}</span><span style="color:var(--accent)">$${v.toFixed(2)}</span></div>
+      <div class="bar-info"><span>${catEmoji(c)} ${catName(c)}</span><span style="color:var(--accent)">$${v.toFixed(2)}</span></div>
       <div class="bar-track"><div class="bar-fill" style="width:${(v/mx*100).toFixed(1)}%"></div></div>
     </div>`).join('')||'<p style="color:var(--text-faint);font-size:12px">No data yet</p>';
-  document.getElementById('recent-list').innerHTML=rs.slice(0,8).map(r=>`<div>${CE[r.category]} <strong style="color:var(--text)">${r.merchant}</strong> — $${r.total.toFixed(2)} <span style="color:var(--text-faint)">${fmtDate(r.date)}</span></div>`).join('')||'<p style="color:var(--text-faint)">No receipts yet</p>';
+  document.getElementById('recent-list').innerHTML=rs.slice(0,8).map(r=>`<div>${catEmoji(r.category)} <strong style="color:var(--text)">${r.merchant}</strong> — $${r.total.toFixed(2)} <span style="color:var(--text-faint)">${fmtDate(r.date)}</span></div>`).join('')||'<p style="color:var(--text-faint)">No receipts yet</p>';
 }
 
 function fmtDate(d) {
@@ -1043,6 +1284,20 @@ function fmtDate(d) {
 (async()=>{
   await openDB();
   allReceipts=await allR();
+
+  // Seed default categories if none exist
+  let existingCats = await allC();
+  if(existingCats.length===0){
+    for(const c of DEFAULT_CATS) await saveC(c);
+    existingCats = await allC();
+  }
+  allCats = existingCats;
+  populateCatSelects();
+  renderFilterChips();
+
+  // OCR toggle state
+  ocrToggle.checked = localStorage.getItem('rv_ocr')==='true';
+
   // Auto-restore prompt if empty but we had a previous sync
   const lastSync=localStorage.getItem('rv_lastSync');
   if(allReceipts.length===0 && lastSync){

@@ -1,4 +1,4 @@
-const CACHE = 'receipt-vault-v4';
+const CACHE = 'receipt-vault-v5';
 const PRECACHE = [
   '/receipt-vault/',
   '/receipt-vault/index.html',
